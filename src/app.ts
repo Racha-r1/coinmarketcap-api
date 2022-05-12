@@ -5,6 +5,8 @@ import puppeteer from 'puppeteer';
 import cors from 'cors';
 import Coin from './interfaces/Coin';
 import CoinDetail from './interfaces/CoinDetails';
+import ExchangeData from './interfaces/ExchangeData';
+import NftData from './interfaces/NftData';
 
 const app: Application = express();
 const port: number | string = process.env.PORT || 8080;
@@ -109,6 +111,119 @@ app.get("/coins/detail/:id", async(req,res) => {
         "links" : links
     }
     res.send(details);
+});
+
+// GET the top ranking exchanges 
+app.get("/exchanges", async(req,res) => {
+    const browser = await puppeteer.launch({'args' : [
+        '--no-sandbox',
+        '--disable-setuid-sandbox'
+      ]});
+    const page = await browser.newPage();
+    await page.goto(`${baseURL}rankings/exchanges`);
+    await page.evaluate(async () => {
+        await new Promise<void>((resolve, reject) => {
+            let totalHeight = 0;
+            let distance = 1200;
+            let timer = setInterval(() => {
+                let scrollHeight = document.body.scrollHeight;
+                window.scrollBy(0, distance);
+                totalHeight += distance;
+
+                if(totalHeight >= scrollHeight){
+                    clearInterval(timer);
+                    resolve();
+                }
+            }, 100);
+        });
+    });
+    const results = await page.evaluate(() => {
+        const results: ExchangeData[] = [];
+        const rows = Array.from(document.querySelectorAll("tbody > tr:not([class])"));
+        rows.forEach(row => {
+            const children = Array.from(row.querySelectorAll("td"));
+            const rank = children[0].innerText;
+            const img = children[1].querySelector("img").src;
+            const pname = children[1].querySelector("p.q7nmo0-0.bogImm") as HTMLParagraphElement;
+            const name = pname.innerText;
+            const exchange_score = children[2].innerText;
+            const volume_24h = children[3].innerText.split("\n")[0];
+            const avg_liquidity = children[4].innerText;
+            const coins = children[7].innerText;
+            const id = children[1].querySelector("a").href.slice(36,children[1].querySelector("a").href.length-1);
+            let exchangeData: ExchangeData = {
+                "id": id,
+                "rank": rank,
+                "img" :  img,
+                "name":  name,
+                "exchange_score": exchange_score,
+                "volume_24h": volume_24h,
+                "avg_liquidity": avg_liquidity,
+                "listed_coins" : coins,
+            }
+            results.push(exchangeData);  
+        });
+        return results;
+    });
+    await browser.close();
+    const filtered = [...new Set(results.map(x => JSON.stringify(x)))].map(x => JSON.parse(x));
+    res.send(filtered);
+});
+
+// GET TOP NFT Projects
+app.get("/nft/:page", async(req,res) => {
+    const pageNum: number = parseInt(req.params.page);
+    const p = pageNum !== NaN ? pageNum : 1;
+    const browser = await puppeteer.launch({'args' : [
+        '--no-sandbox',
+        '--disable-setuid-sandbox'
+      ]})
+    const page = await browser.newPage();
+    await page.goto(`${baseURL}nft/collections?page=${p}`);
+    await page.evaluate(async () => {
+        await new Promise<void>((resolve, reject) => {
+            let totalHeight = 0;
+            let distance = 1200;
+            let timer = setInterval(() => {
+                let scrollHeight = document.body.scrollHeight;
+                window.scrollBy(0, distance);
+                totalHeight += distance;
+
+                if(totalHeight >= scrollHeight){
+                    clearInterval(timer);
+                    resolve();
+                }
+            }, 100);
+        });
+    });
+    const results = await page.evaluate(() => {
+        const results: NftData[] = [];
+        const rows = Array.from(document.querySelectorAll("tbody > tr:not([class])"));
+        rows.forEach(row => {
+            const children = Array.from(row.querySelectorAll("td"));
+            const rank = children[0].innerText;
+            const img = children[1].querySelector("img").src;
+            const name = children[1].querySelector("span").innerText;
+            const volume_24h = children[2].querySelector("div").innerText.split("\n")[0];
+            const estimated_marketcap = children[3].innerText.split("\n")[0];
+            const avg_price = children[5].innerText.split("\n")[0];
+            const amount_of_owners = children[7].innerText.replace(",", "");
+            let nftData: NftData = {
+                "rank": rank,
+                "img" :  img,
+                "name":  name,
+                "volume_24h": volume_24h,
+                "estimated_marketcap": estimated_marketcap,
+                "avg_price": avg_price,
+                "amount_of_owners" : amount_of_owners,
+            }
+            results.push(nftData);  
+        });
+        return results;
+    });
+    await browser.close();
+    const filtered = [...new Set(results.map(x => JSON.stringify(x)))].map(x => JSON.parse(x));
+    res.send(filtered);
 });
 
 app.listen(port, () => {
