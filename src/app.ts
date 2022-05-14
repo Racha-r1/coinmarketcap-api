@@ -7,6 +7,7 @@ import Coin from './interfaces/Coin';
 import CoinDetail from './interfaces/CoinDetails';
 import ExchangeData from './interfaces/ExchangeData';
 import NftData from './interfaces/NftData';
+import {getExchangeRateEuroFromDollar, getExchangeRatePoundFromDollar} from './util';
 
 const app: Application = express();
 const port: number | string = process.env.PORT || 8080;
@@ -23,6 +24,8 @@ app.get("/coins/:page", async(req: Request,res: Response) => {
         '--no-sandbox',
         '--disable-setuid-sandbox'
     ]});
+    const pound = await getExchangeRatePoundFromDollar();
+    const euro = await getExchangeRateEuroFromDollar();
     const page = await browser.newPage();
     await page.goto(`${baseURL}?page=${p}`);
     await page.evaluate(async () => {
@@ -44,6 +47,7 @@ app.get("/coins/:page", async(req: Request,res: Response) => {
     const results = await page.evaluate(() => {
         const results: Coin[] = [];
         const rows = Array.from(document.querySelectorAll("tbody > tr:not([class])"));
+
         rows.forEach(row => {
             const children = Array.from(row.querySelectorAll("td"));
             const lowHigh: string = children[4].innerText;
@@ -53,12 +57,12 @@ app.get("/coins/:page", async(req: Request,res: Response) => {
             const id: string = children[2].querySelector("a").href.slice(37,children[2].querySelector("a").href.length-1);
             const name: string = Array.from(children[2].querySelectorAll("p"))[0].innerText;
             const symbol = Array.from(children[2].querySelectorAll("p"))[1].innerText;
-            const price: string = children[3].querySelector("a").innerText;
+            const usdPrice: string = children[3].querySelector("a").innerText;
             const sign: string = children[4].querySelector("span > span").classList.contains("icon-Caret-down") ? "-" : "+";
             const sign2: string = children[5].querySelector("span > span").classList.contains("icon-Caret-down") ? "-" : "+";
             const marketCapElement = Array.from(children[6].querySelectorAll("p > span"))[1] as HTMLElement;
             const supplyElement = children[8].querySelector("div > div > p") as HTMLElement;
-            const marketcap: string = marketCapElement.innerText;
+            const usdMarketcap: string = marketCapElement.innerText;
             const supply: string = supplyElement.innerText;
             let coinData: Coin = {
                 "id": id,
@@ -66,18 +70,28 @@ app.get("/coins/:page", async(req: Request,res: Response) => {
                 "img" :  img,
                 "name":  name,
                 "symbol": symbol,
-                "price": price,
+                "price": {
+                    "usd": '$' + parseFloat(usdPrice.slice(1).replace(/,/g,'')).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+                },
                 "24h": sign + lowHigh,
                 "7d" : sign2 + sevenDay,
                 "supply": supply,
-                "marketcap": marketcap
+                "marketcap": {
+                    "usd": usdMarketcap,
+                }
             }
-            results.push(coinData);  
+            results.push(coinData); 
         });
         return results;
     });
     await browser.close();
     const filtered = [...new Set(results.map(x => JSON.stringify(x)))].map(x => JSON.parse(x));
+    for (let index in filtered){
+        filtered[index].price.gbp = '£' + (parseFloat(filtered[index].price.usd.slice(1).replace(/,/g,'')) * parseFloat(pound)).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        filtered[index].price.eur = '€' + (parseFloat(filtered[index].price.usd.slice(1).replace(/,/g,'')) * parseFloat(euro)).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        filtered[index].marketcap.gbp = '£' + (parseFloat(filtered[index].marketcap.usd.slice(1).replace(/,/g,'')) * parseFloat(pound)).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        filtered[index].marketcap.eur = '€' + (parseFloat(filtered[index].marketcap.usd.slice(1).replace(/,/g,'')) * parseFloat(euro)).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    }
     res.send(filtered);
 });
 
@@ -93,9 +107,11 @@ app.get("/coins/detail/:id", async(req,res) => {
     const name =  $("div.sc-16r8icm-0.gpRPnR.nameHeader > h2").contents().first().text();
     const symbol = $("div.sc-16r8icm-0.gpRPnR.nameHeader > h2 > small").text();
     const img = $("div.sc-16r8icm-0.gpRPnR.nameHeader > img").attr("src");
-    const price = $("div.priceValue").text();
+    const usdPrice = $("div.priceValue").text();
     const BTCValue = values[0];
     const ETHValue = values[1];
+    const pound = await getExchangeRatePoundFromDollar();
+    const euro = await getExchangeRateEuroFromDollar();
     const links = {
         "project_url": $(list_items[0]).attr("href"),
         "source_code": $(list_items[4]).attr("href"),
@@ -105,7 +121,12 @@ app.get("/coins/detail/:id", async(req,res) => {
         "name" : name,
         "symbol": symbol,
         "img" : img,
-        "price": price,
+        "price": {
+            "usd": '$' + parseFloat(usdPrice.slice(1).replace(/,/g,'')).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ","),
+            "gbp": '£' + (parseFloat(usdPrice.slice(1).replace(/,/g,'')) * parseFloat(pound)).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ","),
+            "eur": '€' + (parseFloat(usdPrice.slice(1).replace(/,/g,'')) * parseFloat(euro)).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+         
+        },
         "BTCValue": BTCValue,
         "ETHValue": ETHValue,
         "links" : links
